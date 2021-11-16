@@ -103,8 +103,8 @@ def eval_my_metric(real,pred,duration=(0,10),alpha=2,debug=0,calcne=1,args={}):
             # 'boundary both-pakdd'
         ]
         # if debug:debug={'D':1, 'M':1,'U':1, 'T':1, 'R':1,'B':1,'V':1}#V:verbose
-        if debug:debug={'D':0, 'M':0,'U':0, 'T':1, 'R':0,'B':0,'V':1, 'DA':1,'UA':1, 'RA':1, 'BSA':1, 'BEA':1,'BBA':1}
-        else:debug={'D':0, 'M':0, 'U':0,'T':0, 'R':0,'B':0,'V':0,'DA':0,'UA':0, 'RA':0, 'BSA':0, 'BEA':0,'BBA':0}
+        if debug:debug={'D':0, 'M':0,'U':0, 'T':1, 'R':0,'B':0,'V':1, 'DA':1,'UA':1,'UAO':0, 'RA':1, 'BSA':1, 'BEA':1,'BBA':1}
+        else:debug={'D':0, 'M':0, 'U':0,'T':0, 'R':0,'B':0,'V':0,'DA':0,'UA':0,'UAO':0, 'RA':0, 'BSA':0, 'BEA':0,'BBA':0}
         
 
         # real=merge_events_if_necessary(real)
@@ -224,6 +224,7 @@ def eval_my_metric(real,pred,duration=(0,10),alpha=2,debug=0,calcne=1,args={}):
             'detect-mono':      {'tp':0,'fp':0,'fn':0,'tn':0},
             'monotony':         {'tp':0,'fp':0,'fn':0,'tn':0},
             'uniformity':       {'tp':0,'fp':0,'fn':0,'tn':0},
+            'uniformity-pakdd-old':       {'tp':0,'fp':0,'fn':0,'tn':0},
             'uniformity-pakdd':       {'tp':0,'fp':0,'fn':0,'tn':0},
             'total duration':   {'tp':0,'fp':0,'fn':0,'tn':0},
             'relative duration':{'tp':0,'fp':0,'fn':0,'tn':0},
@@ -295,8 +296,12 @@ def eval_my_metric(real,pred,duration=(0,10),alpha=2,debug=0,calcne=1,args={}):
             
             ###for pakdd
             tpua=int(tpuc==1) 
+            fnua=int(tpuc>1) 
+            out['uniformity-pakdd-old']['tp']+=tpua
             out['uniformity-pakdd']['tp']+=tpua
-            if debug['UA']:print(f"  UA tp+{tpua}            Z[r+][{ri}][p+]=={tpuc}")
+            out['uniformity-pakdd']['fn']+=fnua
+            if debug['UAO']: print(f"  UAO tp+{tpua}           Z[r+][{ri}][p+]=={tpuc}")
+            if debug['UA']: print(f"  UA tp+{tpua}   fn+{fnua}         Z[r+][{ri}][p+]=={tpuc}")
             
             tpu=1/tpuc if tpuc>0 else 0
             if calcne or tpuc>0:
@@ -444,16 +449,17 @@ def eval_my_metric(real,pred,duration=(0,10),alpha=2,debug=0,calcne=1,args={}):
         if debug['DA']: print(f" DA fn={out['detection-pakdd']['fn']} #r+={len(real)} - tp={out['detection-pakdd']['tp']}"  )
         out['relative duration-pakdd']['fn']=len(real)-out['relative duration-pakdd']['tp']
         if debug['RA']: print(f" RA fn={out['relative duration-pakdd']['fn']} #r+={len(real)} - tp={out['relative duration-pakdd']['tp']}"  )
-        out['uniformity-pakdd']['fn']=len(real)-out['uniformity-pakdd']['tp']
-        if debug['UA']: print(f" RA fn={out['uniformity-pakdd']['fn']} #r+={len(real)} - tp={out['uniformity-pakdd']['tp']}"  )                
+        out['uniformity-pakdd-old']['fn']=len(real)-out['uniformity-pakdd-old']['tp']
+        if debug['UAO']: print(f" UAO fn={out['uniformity-pakdd-old']['fn']} #r+={len(real)} - tp={out['uniformity-pakdd-old']['tp']}"  )                
         out['monotony']['fn']=len(real)-out['monotony']['tp']#+len(pred_)-out['monotony']['tn']
         if debug['M']: print(f"  M fn={out['monotony']['fn']}     #r+={len(real)} - tp={out['monotony']['tp']} //+ #p-={len(pred_)} - tn={out['monotony']['tn']}")
         out['monotony']['fp']=len(pred)-out['monotony']['tp']#+len(real_)-out['monotony']['tn']
         if debug['M']: print(f"  M fp={out['monotony']['fp']}     #p+={len(pred)} - tp={out['monotony']['tp']} //+ #r-={len(real_)} - tn={out['monotony']['tn']}")
         
-                        
+        orphans=0                
         for pi in range(len(pred)):
             fpd=int(len(rel['p+'][pi]['r+'])==0)
+            orphans+=fpd
             out['detect-mono']['fp']+=fpd
             out['detection']['fp']+=fpd
             if debug['D']: print(f" D FP+{fpd}      pi={pi}, r={rel['p+'][pi]['r+']}==0")
@@ -472,8 +478,11 @@ def eval_my_metric(real,pred,duration=(0,10),alpha=2,debug=0,calcne=1,args={}):
 #             for ri in rel['p+'][pi]['r-']:
 #                 out['total duration']['fp']+=dur(rel['p+'][pi]['r-'][ri])
 #                 out['relative duration']['fp']+=dur(rel['p+'][pi]['r-'][ri])/dur(pred[pi])
-        out['uniformity-pakdd']['fp']=len(pred)-out['uniformity-pakdd']['tp']
-        if debug['UA']: print(f" RA fp={out['uniformity-pakdd']['fp']} #r+={len(pred)} - tp={out['uniformity-pakdd']['tp']}"  )                
+        out['uniformity-pakdd-old']['fp']=len(pred)-out['uniformity-pakdd-old']['tp']
+        if debug['UAO']: print(f" UAO fp={out['uniformity-pakdd-old']['fp']} #r+={len(pred)} - tp={out['uniformity-pakdd-old']['tp']}"  )                
+
+        out['uniformity-pakdd']['fp'] = len(pred)-orphans-out['uniformity-pakdd']['tp']
+        if debug['UA']: print(f" UA fp={out['uniformity-pakdd']['fp']} #r+={len(pred)} - orphans={orphans} - tp={out['uniformity-pakdd']['tp']}"  )                
 
         for pi in range(len(pred_)):
             fnd=int(len(rel['p-'][pi]['r-'])==0)
