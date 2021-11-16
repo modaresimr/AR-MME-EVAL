@@ -1,0 +1,9 @@
+ward-metrics
+pandas
+numpy
+psds-eval
+dcase_util
+sed_eval
+ipywidgets
+openpyxl
+plotly

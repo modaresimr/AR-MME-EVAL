@@ -1,18 +1,21 @@
 import math
-
+# import warnings
+# warnings.filterwarnings('error')
 import pandas as pd
-from intervaltree import intervaltree
 from matplotlib.pylab import plt
 from pandas.core.frame import DataFrame
 from prompt_toolkit.shortcuts import set_title
 import numpy as np
 
-def eval(gt, pt,meta=None, clas=None,debug=0,calcne=0):
+def eval(gt, pt,meta=None, clas=None,debug=0,calcne=0,args={}):
     #%matplotlib inline
     if clas is None:
         clas=gt.event_label.append(pt.event_label).unique()
     
     result={}
+    total_time=0
+    import time
+
     for c in clas:
         gtc=gt.loc[gt.event_label==c]
         ptc=pt.loc[pt.event_label==c]
@@ -26,10 +29,15 @@ def eval(gt, pt,meta=None, clas=None,debug=0,calcne=0):
             if meta is not None and f in meta: m=meta[f]
             try:
                 # debug=c=='Dishes'
-                out=eval_my_metric(g,p,m,debug=debug,calcne=calcne)
+                start_time = time.time()
+                out=eval_my_metric(g,p,m,debug=debug,calcne=calcne,args=args)
+                total_time+=time.time() - start_time
             except Exception as e:
                 print(f'============== class={c}=========file={f}')
                 print(e)
+                import traceback
+                print(traceback.format_exc())
+
                 out=eval_my_metric(g,p,m,debug=1,calcne=calcne)
 
                 raise
@@ -39,7 +47,7 @@ def eval(gt, pt,meta=None, clas=None,debug=0,calcne=0):
                 for m in out:
                     for t in out[m]:
                         result[c][m][t]+=out[m][t]
-
+    print(f"======= our evaluation method took {total_time} seconds ---- input size: R={len(gt)} P={len(pt)}")
     return result
 
 
@@ -53,6 +61,7 @@ def intersection(e1,e2):
 def dur(e):
     d= e[1]-e[0]
     if(d<0):
+        print(e)
         raise Exception('erorr duration is less than zero')
     return d
 
@@ -64,10 +73,38 @@ def Z(rel,e,X,Y):
     
     return len(s)
 
-def eval_my_metric(real,pred,duration=(0,10),alpha=2,debug=0,calcne=1):
+def fixLongP(real,pred,rel,ri,pi):
+    if(len(rel['p+'][pi]['r+'])>1):
+        newp=[pred[pi][0],pred[pi][1]]
+        # print(f"p={newp} ri={ri} pi={pi} rel={rel['p+'][pi]['r+']}")
+        if (ri-1) in rel['p+'][pi]['r+']:
+            newp[0]=(real[ri-1][1]+real[ri][0])/2
+            # print(f"ri-1({ri-1}) is in rel==> newp={newp} real[ri-1]={real[ri-1]} real[ri]={real[ri]}")
+        if (ri+1) in rel['p+'][pi]['r+']:
+            newp[1]=(real[ri][1]+real[ri+1][0])/2
+            # print(f"ri+1({ri+1}) is in rel==> newp={newp} real[ri+1]={real[ri+1]} real[ri]={real[ri]}")
+        return newp 
+    return pred[pi]
+
+def eval_my_metric(real,pred,duration=(0,10),alpha=2,debug=0,calcne=1,args={}):
+        prefix='Our: '
+        theta_t=args.get('theta_tp', 0)
+        theta_f=args.get('theta_fp', 1)
+        beta_s=args.get('beta_s',2)
+        beta_e=args.get('beta_e',2)
+        beta_b=args.get('beta',2)
+        pakdd_properties=[
+            'detection-pakdd',
+            'uniformity-pakdd',
+            'total duration',
+            'relative duration-pakdd',
+            'boundary start-pakdd',
+            'boundary end-pakdd',
+            # 'boundary both-pakdd'
+        ]
         # if debug:debug={'D':1, 'M':1,'U':1, 'T':1, 'R':1,'B':1,'V':1}#V:verbose
-        if debug:debug={'D':0, 'M':0,'U':0, 'T':0, 'R':0,'B':0,'V':1}
-        else:debug={'D':0, 'M':0, 'U':0,'T':0, 'R':0,'B':0,'V':0}
+        if debug:debug={'D':0, 'M':0,'U':0, 'T':1, 'R':0,'B':0,'V':1, 'DA':1,'UA':1, 'RA':1, 'BSA':1, 'BEA':1,'BBA':1}
+        else:debug={'D':0, 'M':0, 'U':0,'T':0, 'R':0,'B':0,'V':0,'DA':0,'UA':0, 'RA':0, 'BSA':0, 'BEA':0,'BBA':0}
         
 
         # real=merge_events_if_necessary(real)
@@ -105,12 +142,13 @@ def eval_my_metric(real,pred,duration=(0,10),alpha=2,debug=0,calcne=1):
             
             cond=pi<len(pred) 
             pi_=-1
-
+            # beginProcessed=False
             while  cond:
                 pp=pred[pi-1] if pi>0 else [duration[0],duration[0]]
                 p=pred[pi]
                 p_=(pp[1],p[0])
-                
+                if(p_[0]>p_[1]):
+                    print(f"pi={pi}{list(enumerate(pred))}")
                 if(dur(p_)>0 and (len(pred_)==0 or pred_[-1]!=p_)):
                     pred_.append(p_)
                 pi_=len(pred_)-1
@@ -148,11 +186,26 @@ def eval_my_metric(real,pred,duration=(0,10),alpha=2,debug=0,calcne=1):
                     # tmpp_['r-'].append((ri,r_inter_))
                     tmpr_['p-'][pi_]=r_inter_
                     tmpp_['r-'][ri_]=r_inter_
-                
+                # if(not beginProcessed):
+                #     beginProcessed=true
+                #     dur=p[0]-r[0]
+                #     if(dur>0):
+                #         #underfill start
+                #     else:
+                #         #overfill end
+                        
+
                 
                 if pred[pi][1] < r[1]:
                     pi+=1
-                else: cond=False
+                else: 
+                    cond=False
+                    # dur=p[1]-r[1]
+                    # if(dur>0):
+                    #     #overfill end
+                    # else:
+                    #     #underfill end
+
                 
             
             # for k in list(rel.keys()):
@@ -167,13 +220,21 @@ def eval_my_metric(real,pred,duration=(0,10),alpha=2,debug=0,calcne=1):
         
         out={
             'detection':        {'tp':0,'fp':0,'fn':0,'tn':0},
+            'detection-pakdd':   {'tp':0,'fp':0,'fn':0,'tn':0},
             'detect-mono':      {'tp':0,'fp':0,'fn':0,'tn':0},
             'monotony':         {'tp':0,'fp':0,'fn':0,'tn':0},
             'uniformity':       {'tp':0,'fp':0,'fn':0,'tn':0},
+            'uniformity-pakdd':       {'tp':0,'fp':0,'fn':0,'tn':0},
             'total duration':   {'tp':0,'fp':0,'fn':0,'tn':0},
             'relative duration':{'tp':0,'fp':0,'fn':0,'tn':0},
+            'relative duration-pakdd':{'tp':0,'fp':0,'fn':0,'tn':0},
             'boundary onset':   {'tp':0,'fp':0,'fn':0,'tn':0},
             'boundary offset':  {'tp':0,'fp':0,'fn':0,'tn':0},
+
+            'boundary start-pakdd':   {'tp':0,'fp':0,'fn':0,'tn':0},
+            'boundary end-pakdd':  {'tp':0,'fp':0,'fn':0,'tn':0},
+            'boundary both-pakdd':  {'tp':0,'fp':0,'fn':0,'tn':0},
+            
         }
         
         if debug['V']:
@@ -185,6 +246,8 @@ def eval_my_metric(real,pred,duration=(0,10),alpha=2,debug=0,calcne=1):
             [print(f'{x}: {rel[x]}') for x in rel]
         if debug['V']:plot_events(real,pred,duration,real_,pred_)
         for ri in range(len(real)):
+            rdur=dur(real[ri])
+
             tpd=int(len(rel['r+'][ri]['p+'])>0)
             out['detect-mono']['tp']+=tpd
             out['detection']['tp']+=tpd
@@ -200,17 +263,41 @@ def eval_my_metric(real,pred,duration=(0,10),alpha=2,debug=0,calcne=1):
                         print('error it can not be zero')
                     elif debug['M']:print(f"  M--tp rel[r+][{ri}][p+]={rel['r+'][ri]['p+']}==1 rel[p+][{rpi}][r+]={rel['p+'][rpi]['r+']}>1")
             #}
+            pt=0  #for fp detection-pakdd
+            ttpr=0 #for tp detection-pakdd
             
             for pi in rel['r+'][ri]['p+']:
+                
+
                 tpt=dur(rel['r+'][ri]['p+'][pi])
-                tpr=tpt/dur(real[ri])
+                tpr=tpt/rdur
+                ttpr+=tpr  #for tp detection-pakdd
+                
+                pt+=dur(fixLongP(real,pred,rel,ri,pi)) #for fp detection-pakdd
                 out['total duration']['tp']+=tpt
                 out['relative duration']['tp']+=tpr
                 if debug['T']:print(f"   T tp+={tpt}             rel[r+][{ri}][p+][{pi}]=dur({rel['r+'][ri]['p+'][pi]})")
                 if debug['R']:print(f"    R tp+={tpr}             rel[r+][{ri}][p+][{pi}]==dur({rel['r+'][ri]['p+'][pi]}) / real[{ri}]=dur({real[ri]})")
-
+                
+            
+            cond_fpr=pt/rdur - ttpr if rdur>0 else 0
+            
+            cond_fp= int(cond_fpr > theta_f)
+            cond_tp=int(ttpr>theta_t)
+            out['detection-pakdd']['tp'] += cond_tp
+            out['detection-pakdd']['fp'] += cond_fp
+            out['relative duration-pakdd']['tp']+=ttpr 
+            out['relative duration-pakdd']['fp'] += cond_fpr
+            if debug['DA']: print(f" DA TP+{cond_tp} FP+{cond_fp}      ri={ri}, ttpr={ttpr}>theta_t({theta_t}) cond_fpr={cond_fpr}>theta_f({theta_f})")
+            if debug['RA']: print(f" RA TP+{ttpr} FP+{cond_fpr}      ri={ri}, ttpr={ttpr} cond_fpr={cond_fpr}")
             ####Uniformity{
             tpuc=Z(rel,ri,'r+','p+')
+            
+            ###for pakdd
+            tpua=int(tpuc==1) 
+            out['uniformity-pakdd']['tp']+=tpua
+            if debug['UA']:print(f"  UA tp+{tpua}            Z[r+][{ri}][p+]=={tpuc}")
+            
             tpu=1/tpuc if tpuc>0 else 0
             if calcne or tpuc>0:
                 out['uniformity']['tp']+=tpu
@@ -226,32 +313,60 @@ def eval_my_metric(real,pred,duration=(0,10),alpha=2,debug=0,calcne=1):
                     out['boundary offset']['fn']+=1
                     if debug['B']:print(f"     B onset&offset fn+{1}  ri={ri} pi=[]          ")
             else:
-                relp=pred[rps[0]]
-                boundry_error_b=real[ri][0]-relp[0]
-                ufbp=max(0,-boundry_error_b)/dur(real[ri])
-                ofbp=min(1,max(0,boundry_error_b)/dur(real[ri]))
-                tpbp=min(1,max(0,1-ufbp-ofbp))
-                out['boundary onset']['tp']+=tpbp
-                out['boundary onset']['fn']+=ufbp
-                out['boundary onset']['fp']+=ofbp
-                if debug['B']:print(f"     B onset tp+{tpbp} fp+{ofbp} fn+{ufbp}  ri={ri} pi={rps[0]}     boundary_error_onset={boundry_error_b}     ")
+                # relp=pred[rps[0]]
+                relp=fixLongP(real,pred,rel,ri,rps[0])
+                boundry_error_s=real[ri][0]-relp[0]
+                ufsp=max(0,-boundry_error_s)/rdur
+                ofsp=min(1,max(0,boundry_error_s)/rdur)
+                tpsp=min(1,max(0,1-ufsp-ofsp))
+                out['boundary onset']['tp']+=tpsp
+                out['boundary onset']['fn']+=ufsp
+                out['boundary onset']['fp']+=ofsp
+                if debug['B']:print(f"     B onset tp+{tpsp} fp+{ofsp} fn+{ufsp}  ri={ri} pi={rps[0]}     boundary_error_onset={boundry_error_s}     ")
+                
+                
+                fnsb=1- math.exp(-beta_s * ufsp)
+                fpsb=1- math.exp(-beta_s * ofsp)
+                tpsb=min(1,max(0,1 - fnsb-fpsb))
+                out['boundary start-pakdd']['tp']+=tpsb
+                out['boundary start-pakdd']['fn']+=fnsb
+                out['boundary start-pakdd']['fp']+=fpsb
 
+                if debug['BSA']:print(f"     BSA onset tp+{tpsb:.2f} fp+{fpsb:.2f} fn+{fnsb:.2f}  ri={ri} pi={rps[0]}     underfill_sr={ufsp:.2f} overfill_sr={ofsp:.2f} dur_s={boundry_error_s:.2f}     ")
+                
                 #####################boundary offset
-                relp=pred[rps[-1]]
+                # relp=pred[rps[-1]]
+                relp=fixLongP(real,pred,rel,ri,rps[-1])
                 boundry_error_e=relp[1]-real[ri][1]
-                ufep=min(1,max(0,-boundry_error_e)/dur(real[ri]))
-                ofep=min(1,max(0,boundry_error_e)/dur(real[ri]))
+                ufep=min(1,max(0,-boundry_error_e)/rdur)
+                ofep=min(1,max(0,boundry_error_e)/rdur)
                 tpep=max(0,1-ufep-ofep)
                 out['boundary offset']['tp']+=tpep
                 out['boundary offset']['fn']+=ufep
                 out['boundary offset']['fp']+=ofep
-                if debug['B']:print(f"     B offset tp+{tpep} fp+{ofep} fn+{ufep}  ri={ri} pi={rps[-1]}     boundary_error_onset={boundry_error_e}     ")
+                if debug['B']:print(f"     B offset tp+{tpep} fp+{ofep} fn+{ufep}  ri={ri} pi={rps[-1]}     boundary_error_offset={boundry_error_e}     ")
 
-            
+                fneb=1- math.exp(-beta_e * ufep)
+                fpeb=1- math.exp(-beta_e * ofep)
+                tpeb=min(1,max(0,1 - fneb-fpeb))
+                out['boundary end-pakdd']['tp']+=tpeb
+                out['boundary end-pakdd']['fn']+=fneb
+                out['boundary end-pakdd']['fp']+=fpeb
+
+                if debug['BEA']:print(f"     BEA onset tp+{tpeb:.2f} fp+{fpeb:.2f} fn+{fneb:.2f}  ri={ri} pi={rps[0]}     underfill_er={ufep:.2f} overfill_er={ofep:.2f} dur_e={boundry_error_e:.2f}     ")
+
+                fnbb=1- math.exp(-beta_b * (ufsp+ufep))
+                fpbb=1- math.exp(-beta_b * (ofsp+ofep))
+                tpbb=min(1,max(0,1 - fnbb-fpbb))
+                out['boundary both-pakdd']['tp']+=tpbb
+                out['boundary both-pakdd']['fn']+=fnbb
+                out['boundary both-pakdd']['fp']+=fpbb
+                if debug['BBA']:print(f"     BBA both tp+{tpbb:.2f} fp+{fpbb:.2f} fn+{fnbb:.2f}  ri={ri} pi={rps[0]}     underfill_br={(ufsp+ufep):.2f} overfill_er={(ofsp+ofep):.2f} dur_s={boundry_error_s:.2f} dur_e={boundry_error_e:.2f}     ")
+                
 
             for pi in rel['r+'][ri]['p-']:
                 fnt=dur(rel['r+'][ri]['p-'][pi])
-                fnr=fnt/dur(real[ri])
+                fnr=fnt/rdur
                 out['total duration']['fn']+=fnt
                 out['relative duration']['fn']+=fnr if fnr<0.99 else calcne
                 if debug['T']:print(f"   T fn+={fnt}             rel[r+][{ri}][p-][{pi}]=dur({rel['r+'][ri]['p-'][pi]})")
@@ -299,14 +414,14 @@ def eval_my_metric(real,pred,duration=(0,10),alpha=2,debug=0,calcne=1):
                     if debug['B']:print(f"     B onset&offset fp+{1}  ri-={ri} pi-=[]          ")
                 else:
                     relp=pred_[rps[0]]
-                    boundry_error_b=real_[ri][0]-relp[0]
-                    ufbp=min(1,max(0,-boundry_error_b)/dur(real_[ri]))
-                    ofbp=min(1,max(0,boundry_error_b)/dur(real_[ri]))
-                    tpbp=max(0,1-ufbp-ofbp)
-                    out['boundary onset']['tn']+=tpbp
-                    out['boundary onset']['fn']+=ofbp
-                    out['boundary onset']['fp']+=ufbp
-                    if debug['B']:print(f"     B onset tn+{tpbp} fp+{ufbp} fn+{ofbp}   ri-={ri} pi-={rps[0]}    boundary_error_onset={boundry_error_b}     ")
+                    boundry_error_s=real_[ri][0]-relp[0]
+                    ufsp=min(1,max(0,-boundry_error_s)/dur(real_[ri]))
+                    ofsp=min(1,max(0,boundry_error_s)/dur(real_[ri]))
+                    tpsp=max(0,1-ufsp-ofsp)
+                    out['boundary onset']['tn']+=tpsp
+                    out['boundary onset']['fn']+=ofsp
+                    out['boundary onset']['fp']+=ufsp
+                    if debug['B']:print(f"     B onset tn+{tpsp} fp+{ufsp} fn+{ofsp}   ri-={ri} pi-={rps[0]}    boundary_error_onset={boundry_error_s}     ")
 
                     #####################boundary offset
                     relp=pred_[rps[-1]]
@@ -325,7 +440,12 @@ def eval_my_metric(real,pred,duration=(0,10),alpha=2,debug=0,calcne=1):
         out['detect-mono']['fn']=len(real)-out['detect-mono']['tp']
         out['detection']['fn']=len(real)-out['detection']['tp']
         if debug['D']: print(f" D fn={out['detect-mono']['fn']} #r+={len(real)} - tp={out['detect-mono']['tp']}"  )
-                        
+        out['detection-pakdd']['fn']=len(real)-out['detection-pakdd']['tp']
+        if debug['DA']: print(f" DA fn={out['detection-pakdd']['fn']} #r+={len(real)} - tp={out['detection-pakdd']['tp']}"  )
+        out['relative duration-pakdd']['fn']=len(real)-out['relative duration-pakdd']['tp']
+        if debug['RA']: print(f" RA fn={out['relative duration-pakdd']['fn']} #r+={len(real)} - tp={out['relative duration-pakdd']['tp']}"  )
+        out['uniformity-pakdd']['fn']=len(real)-out['uniformity-pakdd']['tp']
+        if debug['UA']: print(f" RA fn={out['uniformity-pakdd']['fn']} #r+={len(real)} - tp={out['uniformity-pakdd']['tp']}"  )                
         out['monotony']['fn']=len(real)-out['monotony']['tp']#+len(pred_)-out['monotony']['tn']
         if debug['M']: print(f"  M fn={out['monotony']['fn']}     #r+={len(real)} - tp={out['monotony']['tp']} //+ #p-={len(pred_)} - tn={out['monotony']['tn']}")
         out['monotony']['fp']=len(pred)-out['monotony']['tp']#+len(real_)-out['monotony']['tn']
@@ -337,6 +457,11 @@ def eval_my_metric(real,pred,duration=(0,10),alpha=2,debug=0,calcne=1):
             out['detect-mono']['fp']+=fpd
             out['detection']['fp']+=fpd
             if debug['D']: print(f" D FP+{fpd}      pi={pi}, r={rel['p+'][pi]['r+']}==0")
+            out['detection-pakdd']['fp']+=fpd
+            if debug['DA']: print(f" DA FP+{fpd}      pi={pi}, r={rel['p+'][pi]['r+']}==0")
+            out['relative duration-pakdd']['fp']+=fpd
+            if debug['RA']: print(f" RA FP+{fpd}      pi={pi}, r={rel['p+'][pi]['r+']}==0")
+
             ####Uniformity{
             fpuc=Z(rel,pi,'p+','r+')
             if calcne or fpuc>0:
@@ -347,6 +472,8 @@ def eval_my_metric(real,pred,duration=(0,10),alpha=2,debug=0,calcne=1):
 #             for ri in rel['p+'][pi]['r-']:
 #                 out['total duration']['fp']+=dur(rel['p+'][pi]['r-'][ri])
 #                 out['relative duration']['fp']+=dur(rel['p+'][pi]['r-'][ri])/dur(pred[pi])
+        out['uniformity-pakdd']['fp']=len(pred)-out['uniformity-pakdd']['tp']
+        if debug['UA']: print(f" RA fp={out['uniformity-pakdd']['fp']} #r+={len(pred)} - tp={out['uniformity-pakdd']['tp']}"  )                
 
         for pi in range(len(pred_)):
             fnd=int(len(rel['p-'][pi]['r-'])==0)
@@ -358,9 +485,15 @@ def eval_my_metric(real,pred,duration=(0,10),alpha=2,debug=0,calcne=1):
 
 #         plot_events_with_event_scores(range(len(real)),range(len(pred)),real,pred)
 #         plot_events_with_event_scores(range(len(real_)),range(len(pred_)),real_,pred_)
+
+        newout={}
+        for m in pakdd_properties:
+            newout[prefix+m] = out[m]
+        # out=dict(filter(lambda elem: elem[0] in pakdd_properties, out.items()))
         if debug['V']:
-            for m in out: print(m,out[m])
-        return  out
+            [print(m, newout[m]) for m in newout]
+
+        return  newout
 
 def plot_events(real,pred,meta,real_,pred_, label=None):
     from matplotlib.pylab import plt
