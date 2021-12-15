@@ -37,7 +37,7 @@ def plot_spider(tbl):
             theta=categories,
             fill='toself',
             name=c,
-            opacity=0.6,
+            opacity=0.75,
             marker=dict(color=colors[i])
 
         ))
@@ -106,7 +106,7 @@ def plot_multi_spider(dic_tbl):
                 theta=props,
                 fill='toself',
                 name=team[0:15],
-                opacity=0.6,
+                opacity=0.75,
                 legendgroup=team,
                 showlegend=i == 0,
                 # fillcolor='#551f77b4',#colors[k],

@@ -103,8 +103,8 @@ def eval_my_metric(real,pred,duration=(0,10),alpha=2,debug=0,calcne=1,args={}):
             # 'boundary both-pakdd'
         ]
         # if debug:debug={'D':1, 'M':1,'U':1, 'T':1, 'R':1,'B':1,'V':1}#V:verbose
-        if debug:debug={'D':0, 'M':0,'U':0, 'T':1, 'R':0,'B':0,'V':1, 'DA':1,'UA':1,'UAO':0, 'RA':1, 'BSA':1, 'BEA':1,'BBA':1}
-        else:debug={'D':0, 'M':0, 'U':0,'T':0, 'R':0,'B':0,'V':0,'DA':0,'UA':0,'UAO':0, 'RA':0, 'BSA':0, 'BEA':0,'BBA':0}
+        if debug:debug={'D':0, 'M':0,'U':0, 'T':1, 'R':0,'B':0,'V':1, 'DA':1,'UA':1,'UAO':0, 'RA':1,'RAO':1, 'BSA':1, 'BEA':1,'BBA':1}
+        else:debug={'D':0, 'M':0, 'U':0,'T':0, 'R':0,'B':0,'V':0,'DA':0,'UA':0,'UAO':0, 'RA':0,'RAO':0, 'BSA':0, 'BEA':0,'BBA':0}
         
 
         # real=merge_events_if_necessary(real)
@@ -112,8 +112,12 @@ def eval_my_metric(real,pred,duration=(0,10),alpha=2,debug=0,calcne=1,args={}):
         # real_tree=_makeIntervalTree(real,'r')
         # pred_tree=_makeIntervalTree(pred,'p')
         # duration=(min(duration[0],real[0][0]),max(duration[1],real[-1][1]))
-        real=real[real[:,0].argsort(),:]
-        pred=pred[pred[:,0].argsort(),:]
+        start=0
+        if debug['V']:start=min([min(real[:,0]),min(pred[:,0])])-1
+
+        real=real[real[:,0].argsort(),:]-start
+        pred=pred[pred[:,0].argsort(),:]-start
+        
         real=np.vstack((real,[duration[1],duration[1]]))# add a zero duration event in the end for ease comparision the last event
         pred=np.vstack((pred,[duration[1],duration[1]]))# add a zero duration event in the end for ease comparision the last event
         #_ means negative
@@ -228,6 +232,7 @@ def eval_my_metric(real,pred,duration=(0,10),alpha=2,debug=0,calcne=1,args={}):
             'uniformity-pakdd':       {'tp':0,'fp':0,'fn':0,'tn':0},
             'total duration':   {'tp':0,'fp':0,'fn':0,'tn':0},
             'relative duration':{'tp':0,'fp':0,'fn':0,'tn':0},
+            'relative duration-pakdd-old':{'tp':0,'fp':0,'fn':0,'tn':0},
             'relative duration-pakdd':{'tp':0,'fp':0,'fn':0,'tn':0},
             'boundary onset':   {'tp':0,'fp':0,'fn':0,'tn':0},
             'boundary offset':  {'tp':0,'fp':0,'fn':0,'tn':0},
@@ -245,7 +250,7 @@ def eval_my_metric(real,pred,duration=(0,10),alpha=2,debug=0,calcne=1,args={}):
             print("pred_=",pred_)
             #for x in rel:
             [print(f'{x}: {rel[x]}') for x in rel]
-        if debug['V']:plot_events(real,pred,duration,real_,pred_)
+        # if debug['V']:plot_events(real,pred,duration,real_,pred_)
         for ri in range(len(real)):
             rdur=dur(real[ri])
 
@@ -281,16 +286,26 @@ def eval_my_metric(real,pred,duration=(0,10),alpha=2,debug=0,calcne=1,args={}):
                 if debug['R']:print(f"    R tp+={tpr}             rel[r+][{ri}][p+][{pi}]==dur({rel['r+'][ri]['p+'][pi]}) / real[{ri}]=dur({real[ri]})")
                 
             
-            cond_fpr=pt/rdur - ttpr if rdur>0 else 0
+            cond_fprd = pt/rdur - ttpr if rdur>0 else 0
             
-            cond_fp= int(cond_fpr > theta_f)
+            cond_fp= int(cond_fprd > theta_f)
             cond_tp=int(ttpr>theta_t)
             out['detection-pakdd']['tp'] += cond_tp
             out['detection-pakdd']['fp'] += cond_fp
+            if debug['DA']: print(f" DA TP+{cond_tp} FP+{cond_fp}      ri={ri}, ttpr={ttpr}>theta_t({theta_t}) cond_fprd={cond_fprd}>theta_f({theta_f})")
+
+            out['relative duration-pakdd-old']['tp']+=ttpr 
+            out['relative duration-pakdd-old']['fp'] += cond_fprd
+            if debug['RAO']: print(f" RAO TP+{ttpr} FP+{cond_fprd}      ri={ri}, ttpr={ttpr} cond_fpr={cond_fpr}")
+
+            conf_fnr = 1-ttpr if ttpr>0 else 0
+            cond_fpr = max(0, min(1, cond_fprd))
             out['relative duration-pakdd']['tp']+=ttpr 
             out['relative duration-pakdd']['fp'] += cond_fpr
-            if debug['DA']: print(f" DA TP+{cond_tp} FP+{cond_fp}      ri={ri}, ttpr={ttpr}>theta_t({theta_t}) cond_fpr={cond_fpr}>theta_f({theta_f})")
-            if debug['RA']: print(f" RA TP+{ttpr} FP+{cond_fpr}      ri={ri}, ttpr={ttpr} cond_fpr={cond_fpr}")
+            out['relative duration-pakdd']['fn'] += conf_fnr
+            
+            if debug['RA']: print(f" RA TP+{ttpr} FP+{cond_fpr}  FN+{conf_fnr}    ri={ri}, ttpr={ttpr} cond_fpr={cond_fpr}")
+
             ####Uniformity{
             tpuc=Z(rel,ri,'r+','p+')
             
@@ -447,8 +462,8 @@ def eval_my_metric(real,pred,duration=(0,10),alpha=2,debug=0,calcne=1,args={}):
         if debug['D']: print(f" D fn={out['detect-mono']['fn']} #r+={len(real)} - tp={out['detect-mono']['tp']}"  )
         out['detection-pakdd']['fn']=len(real)-out['detection-pakdd']['tp']
         if debug['DA']: print(f" DA fn={out['detection-pakdd']['fn']} #r+={len(real)} - tp={out['detection-pakdd']['tp']}"  )
-        out['relative duration-pakdd']['fn']=len(real)-out['relative duration-pakdd']['tp']
-        if debug['RA']: print(f" RA fn={out['relative duration-pakdd']['fn']} #r+={len(real)} - tp={out['relative duration-pakdd']['tp']}"  )
+        out['relative duration-pakdd-old']['fn']=len(real)-out['relative duration-pakdd-old']['tp']
+        if debug['RAO']: print(f" RAO fn={out['relative duration-pakdd-old']['fn']} #r+={len(real)} - tp={out['relative duration-pakdd-old']['tp']}"  )
         out['uniformity-pakdd-old']['fn']=len(real)-out['uniformity-pakdd-old']['tp']
         if debug['UAO']: print(f" UAO fn={out['uniformity-pakdd-old']['fn']} #r+={len(real)} - tp={out['uniformity-pakdd-old']['tp']}"  )                
         out['monotony']['fn']=len(real)-out['monotony']['tp']#+len(pred_)-out['monotony']['tn']
@@ -465,8 +480,8 @@ def eval_my_metric(real,pred,duration=(0,10),alpha=2,debug=0,calcne=1,args={}):
             if debug['D']: print(f" D FP+{fpd}      pi={pi}, r={rel['p+'][pi]['r+']}==0")
             out['detection-pakdd']['fp']+=fpd
             if debug['DA']: print(f" DA FP+{fpd}      pi={pi}, r={rel['p+'][pi]['r+']}==0")
-            out['relative duration-pakdd']['fp']+=fpd
-            if debug['RA']: print(f" RA FP+{fpd}      pi={pi}, r={rel['p+'][pi]['r+']}==0")
+            out['relative duration-pakdd-old']['fp']+=fpd
+            if debug['RAO']: print(f" RAO FP+{fpd}      pi={pi}, r={rel['p+'][pi]['r+']}==0")
 
             ####Uniformity{
             fpuc=Z(rel,pi,'p+','r+')
